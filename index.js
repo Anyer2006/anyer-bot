@@ -57,17 +57,17 @@ async function iniciarBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-       if (qr) {
-            console.log("\n" + "=".repeat(40));
-            console.log("📢 [SISTEMA] ESCANEA ESTE CÓDIGO NUEVO:");
-            console.log("=".repeat(40) + "\n");
+      if (qr) {
+            console.log("\n" + "=".repeat(50));
+            console.log("🔗 ENLACE DIRECTO AL QR (HAZ CLIC AQUÍ):");
+            // Este link genera una imagen PNG real, no texto
+            console.log(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
+            console.log("=".repeat(50));
             
-            // Cambiamos small: true a false para que sea más grande y nítido
-            qrcode.generate(qr, { small: false });
-            
-            console.log("\n" + "=".repeat(40));
-            console.log("💡 TIP: Si no lo agarra, aleja el zoom (Ctrl -)");
-            console.log("=".repeat(40) + "\n");
+            // Mantenemos el de texto por si acaso
+            console.log("\n📢 O intenta escanear este (Zoom 60%):");
+            qrcode.generate(qr, { small: true });
+            console.log("=".repeat(50) + "\n");
         }
 
         if (connection === 'close') {
