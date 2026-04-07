@@ -1,0 +1,13 @@
+{
+  "name": "bot-whatsapp-anyer",
+  "version": "1.0.0",
+  "description": "Automatización con IA para Anyer Mora",
+  "main": "index.js",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
+    "groq-sdk": "^0.3.3",
+    "mongoose": "^8.2.1",
+    "pino": "^8.19.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
