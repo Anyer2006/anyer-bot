@@ -57,10 +57,17 @@ async function iniciarBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
-            console.log("\n📢 [SISTEMA] ESCANEA EL CÓDIGO QR ABAJO:");
-            qrcode.generate(qr, { small: true });
-            console.log("Tip: Si el QR se ve mal, reduce el zoom del navegador (Ctrl -)\n");
+       if (qr) {
+            console.log("\n" + "=".repeat(40));
+            console.log("📢 [SISTEMA] ESCANEA ESTE CÓDIGO NUEVO:");
+            console.log("=".repeat(40) + "\n");
+            
+            // Cambiamos small: true a false para que sea más grande y nítido
+            qrcode.generate(qr, { small: false });
+            
+            console.log("\n" + "=".repeat(40));
+            console.log("💡 TIP: Si no lo agarra, aleja el zoom (Ctrl -)");
+            console.log("=".repeat(40) + "\n");
         }
 
         if (connection === 'close') {
