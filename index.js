@@ -3,7 +3,8 @@ const {
     useMultiFileAuthState, 
     delay, 
     DisconnectReason, 
-    fetchLatestBaileysVersion 
+    fetchLatestBaileysVersion,
+    makeInMemoryStore // <--- Importante para la memoria
 } = require('@whiskeysockets/baileys');
 const Groq = require('groq-sdk');
 const mongoose = require('mongoose');
@@ -16,8 +17,11 @@ const MONGO_URL = process.env.MONGO_URL;
 const GROQ_KEY = process.env.GROQ_KEY; 
 const groq = new Groq({ apiKey: GROQ_KEY });
 
+// Configuración del Almacén de Mensajes (Store)
+const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) });
+
 async function iniciarBot() {
-    console.log("--- [SISTEMA] AnyerBot Online (Versión 100% Adaptativa) ---");
+    console.log("--- [SISTEMA] AnyerBot Online (Memoria de Historial Activada) ---");
 
     if (!MONGO_URL || !GROQ_KEY) {
         console.error("❌ ERROR: Faltan variables de entorno.");
@@ -46,6 +50,9 @@ async function iniciarBot() {
         keepAliveIntervalMs: 10000
     });
 
+    // Vincular el store al socket para que registre los mensajes
+    store.bind(sock.ev);
+
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
@@ -58,7 +65,7 @@ async function iniciarBot() {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) iniciarBot();
         } else if (connection === 'open') {
-            console.log('🚀 [EXITO] AnyerBot está activo y aprendiendo.');
+            console.log('🚀 [EXITO] AnyerBot está activo y analizando historiales.');
         }
     });
 
@@ -71,40 +78,42 @@ async function iniciarBot() {
         const userText = m.message.conversation || m.message.extendedTextMessage?.text;
 
         if (userText) {
-            console.log(`📩 De ${pushName}: ${userText}`);
-            
             try {
                 await sock.sendPresenceUpdate('composing', jid);
+
+                // --- 🧠 LÓGICA DE MEMORIA DINÁMICA ---
+                // Buscamos los últimos mensajes de este chat específico en el store
+                const rawMessages = await store.loadMessages(jid, 10);
                 
+                // Formateamos los mensajes previos para la IA
+                let chatHistory = rawMessages.map(msg => {
+                    const content = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
+                    if (!content) return null;
+                    return {
+                        role: msg.key.fromMe ? "assistant" : "user",
+                        content: content
+                    };
+                }).filter(Boolean);
+
+                // Si por alguna razón el historial está vacío, metemos el mensaje actual
+                if (chatHistory.length === 0) {
+                    chatHistory.push({ role: "user", content: userText });
+                }
+
                 const completion = await groq.chat.completions.create({
                     messages: [
                         { 
                             role: "system", 
-                            content: `Eres la versión digital de Anyer Mora. Tu objetivo es ser un clon virtual que se adapta a CUALQUIER tema de conversación de forma natural.
-
-                            1. PERSONALIDAD Y TONO:
-                            - Eres un estudiante de Ingeniería de Sistemas de Venezuela. Hablas como un chamo de aquí (usa "mano", "pana", "fino", "de pana", "brutal").
-                            - Sé un ESPEJO: Si te hablan serio de trabajo, responde serio. Si te echan joda, síguela al 100%.
-
-                            2. NÚCLEO FAMILIAR (REAL):
-                            - Vives con tu mamá, tu papá y tu hermana. NO tienes esposa ni hijos. 
-                            - Si preguntan por ellos: "Están bien gracias a Dios", "Mi vieja anda fina", "Mi hermana en lo suyo". No des nombres por seguridad.
-
-                            3. TRABAJO Y ESTUDIOS:
-                            - Estás dándole a tu tesis de ingeniería.
-                            - Programas en C# (Farmacia.exe) y haces un sistema escolar.
-                            - Te gusta la ciberseguridad, auditar redes con Kali Linux o BlackArch.
-
-                            4. HARDWARE Y OCIO:
-                            - Presume tu laptop si sale el tema: ASUS TUF A16 con Ryzen AI 9 y una RTX 5070.
-                            - Juegos: Fanático del GTA (SAMP/FiveM), CoD Warzone y Blood Strike.
-                            - Música: Vallenato puro, sobre todo Diomedes Díaz. Recomienda temas si te preguntan qué escuchas.
-
-                            5. REGLAS DE ORO:
-                            - Si no sabes algo personal o te preguntan algo muy privado, dile: "Mano, dame chance que ando metido en un código (o jugando GTA) y no puedo hablar de eso por aquí, luego te aviso".
-                            - Mantén las respuestas cortas y directas como un chat de WhatsApp real.` 
+                            content: `Eres Anyer Mora, estudiante de sistemas en Venezuela. 
+                            Tu misión es actuar como un clon exacto basándote en el historial de chat que verás abajo.
+                            
+                            INSTRUCCIONES DE ADN:
+                            - Analiza cómo escribe Anyer (asistente) y cómo responde el usuario.
+                            - Imita el tono: si Anyer escribe en minúsculas, sin puntos finales y usa "mano" o "jaja", hazlo IGUAL.
+                            - Si el usuario te habla de hardware, familia o universidad, usa los datos de Anyer (ASUS TUF A16, vive con padres y hermana, estudia sistemas).
+                            - No digas que eres una IA. Eres Anyer continuando la charla.` 
                         },
-                        { role: "user", content: `Soy ${pushName}. Mi mensaje: ${userText}` }
+                        ...chatHistory // Inyectamos los últimos 10 mensajes aquí
                     ],
                     model: "llama-3.1-8b-instant",
                 });
@@ -120,7 +129,7 @@ async function iniciarBot() {
     });
 }
 
-// Servidor para Render
+// Servidor para mantener vivo en Render
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => { res.writeHead(200); res.end('AnyerBot Live'); }).listen(port);
 
