@@ -87,7 +87,7 @@ async function iniciarBot() {
                         { role: "system", content: "Eres Anyer Mora, un experto en sistemas de Venezuela. Responde de forma técnica pero amable y breve." },
                         { role: "user", content: userText }
                     ],
-                    model: "llama3-8b-8192",
+                    model: "llama-3.1-8b-instant",
                 });
 
                 const aiResponse = completion.choices[0].message.content;
