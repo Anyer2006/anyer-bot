@@ -1,70 +1,110 @@
-const { default: makeWASocket, useMultiFileAuthState, delay, DisconnectReason } = require('@whiskeysockets/baileys');
+const { 
+    default: makeWASocket, 
+    useMultiFileAuthState, 
+    delay, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion 
+} = require('@whiskeysockets/baileys');
 const Groq = require('groq-sdk');
 const mongoose = require('mongoose');
 const pino = require('pino');
+const qrcode = require('qrcode-terminal');
 
-// --- CONFIGURACIÓN ---
-const MONGO_URL = 'TU_ENLACE_QUE_ME_PASASTE'; 
-const GROQ_KEY = 'TU_API_KEY_DE_GROQ'; // Cámbiala por la gsk_...
+// --- CONFIGURACIÓN DINÁMICA (Prioriza Variables de Entorno) ---
+const MONGO_URL = process.env.MONGO_URL; 
+const GROQ_KEY = process.env.GROQ_KEY; 
 
 const groq = new Groq({ apiKey: GROQ_KEY });
 
 async function iniciarBot() {
-    await mongoose.connect(MONGO_URL);
-    console.log("✅ Conectado a la base de datos MongoDB");
+    console.log("--- [SISTEMA] Iniciando AnyerBot (Versión Render-Cloud) ---");
 
+    // 1. Validar Variables de Entorno
+    if (!MONGO_URL || !GROQ_KEY) {
+        console.error("❌ ERROR CRÍTICO: Faltan variables de entorno (MONGO_URL o GROQ_KEY) en Render.");
+        process.exit(1);
+    }
+
+    // 2. Conexión a MongoDB
+    try {
+        await mongoose.connect(MONGO_URL);
+        console.log("✅ [DB] Conectado exitosamente a MongoDB Atlas");
+    } catch (err) {
+        console.error("❌ [DB] Error de conexión:", err.message);
+        setTimeout(iniciarBot, 10000); // Reintentar en 10 seg
+        return;
+    }
+
+    // 3. Configuración de Autenticación
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+    const { version } = await fetchLatestBaileysVersion();
 
+    // 4. Configuración del Socket de WhatsApp
     const sock = makeWASocket({
+        version,
         auth: state,
-        printQRInTerminal: true,
         logger: pino({ level: 'silent' }),
-        browser: ['Anyer AI', 'MacOS', '3.0']
+        printQRInTerminal: false, // Lo manejamos manualmente para asegurar legibilidad
+        browser: ['AnyerBot', 'Chrome', '1.0.0'],
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 0,
+        keepAliveIntervalMs: 10000
     });
 
     sock.ev.on('creds.update', saveCreds);
 
+    // 5. Gestión de Conexión y QR
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            console.log("\n📢 [SISTEMA] ESCANEA EL CÓDIGO QR ABAJO:");
+            qrcode.generate(qr, { small: true });
+            console.log("Tip: Si el QR se ve mal, reduce el zoom del navegador (Ctrl -)\n");
+        }
+
+        if (connection === 'close') {
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log(`🔄 Conexión cerrada. Reintentando: ${shouldReconnect}`);
+            if (shouldReconnect) iniciarBot();
+        } else if (connection === 'open') {
+            console.log('🚀 [EXITO] AnyerBot está EN LÍNEA y listo.');
+        }
+    });
+
+    // 6. Lógica de Respuesta con IA (Groq)
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0];
         if (!m.message || m.key.fromMe) return;
 
-        const remoteJid = m.key.remoteJid;
-        const text = m.message.conversation || m.message.extendedTextMessage?.text;
+        const jid = m.key.remoteJid;
+        const userText = m.message.conversation || m.message.extendedTextMessage?.text;
 
-        if (text) {
-            console.log(`📩 Mensaje de ${remoteJid}: ${text}`);
-
-            // Simulación humana: "Escribiendo..." y delay aleatorio
-            await sock.sendPresenceUpdate('composing', remoteJid);
-            await delay(Math.floor(Math.random() * 5000) + 3000); 
-
+        if (userText) {
+            console.log(`📩 Mensaje de ${jid}: ${userText}`);
+            
             try {
+                // Simulación de escritura
+                await sock.sendPresenceUpdate('composing', jid);
+                
                 const completion = await groq.chat.completions.create({
                     messages: [
-                        { role: "system", content: "Eres Anyer Mora, un experto en sistemas y desarrollador de Venezuela. Responde de forma amable, inteligente y breve. Si no puedes atender en el momento, dile que la IA de Anyer está procesando su duda." },
-                        { role: "user", content: text }
+                        { role: "system", content: "Eres Anyer Mora, un experto en sistemas de Venezuela. Responde de forma técnica pero amable y breve. Si te preguntan algo complejo, menciona que estás analizando los protocolos." },
+                        { role: "user", content: userText }
                     ],
                     model: "llama3-8b-8192",
                 });
 
-                const respuestaIA = completion.choices[0].message.content;
-                await sock.sendMessage(remoteJid, { text: respuestaIA });
+                const aiResponse = completion.choices[0].message.content;
+                await delay(2000); // Pausa natural
+                await sock.sendMessage(jid, { text: aiResponse });
 
             } catch (error) {
-                console.error("❌ Error en Groq IA:", error);
+                console.error("❌ [IA ERROR]:", error.message);
             }
-        }
-    });
-
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'close') {
-            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) iniciarBot();
-        } else if (connection === 'open') {
-            console.log('🚀 Sistema de Anyer conectado a WhatsApp');
         }
     });
 }
 
+// Arrancar el sistema
 iniciarBot();
